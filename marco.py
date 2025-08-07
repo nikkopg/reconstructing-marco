@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import Input
+from tensorflow.keras.layers import Input, Model
 from tensorflow.keras.layers import AveragePooling2D, MaxPooling2D, Concatenate
 
 
@@ -40,7 +40,67 @@ class Marco(tf.keras.Model):
     
 
     def build(self, depth_multiplier=1.0, create_aux_logits=True):
-        pass
+        
+        '''
+        Full network architecture is shown in model-arch.txt
+        '''
+
+        # Bigger input layer (599, 599, 3)
+        self.input_layer = Input(shape=(599, 599, 3), name="input")
+
+        # Additional layer to compress larger input image, naming it as Conv2d_0a_3x3
+        x = self.conv2d_bn(self.input_layer, filters=16, kernel_size=(3, 3), strides=2, name="Inception/Conv2d_0a_3x3")
+
+        # First convolutional layer block
+        x = self.conv2d_bn(x, filters=32, kernel_size=(3, 3), strides=(2, 2), padding='valid', name="Inception/Conv2d_1a_3x3")
+        x = self.conv2d_bn(x, filters=32, kernel_size=(3, 3), padding='valid', name="Inception/Conv2d_2a_3x3")
+        x = self.conv2d_bn(x, filters=64, kernel_size=(3, 3), strides=1, name="Inception/Conv2d_2b_3x3")
+        x = MaxPooling2D((3, 3), strides=2, padding='valid', name="Inception/Inception/MaxPool_3a_3x3/MaxPool")(x)
+
+        # Second convolutional layer block
+        x = self.conv2d_bn(x, filters=80, kernel_size=(1, 1), padding='valid', name='Inception/Conv2d_3b_1x1')
+        x = self.conv2d_bn(x, filters=self.max_depth['Conv2d_4a_3x3'], kernel_size=(3, 3), padding='valid', name='Inception/Conv2d_4a_3x3')
+        x = MaxPooling2D((3, 3), strides=(2, 2), padding='valid', name="Inception/Inception/MaxPool_5a_3x3/MaxPool")(x)
+
+        # Mixed 5b, 5c, 5d blocks
+        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5b")
+        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5c")
+        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5d")
+
+        return Model(self.input_layer, x, name='MARCO_InceptionV3')
+    
+
+    def mixed_5_block(self, x, depth_multiplier, name="Mixed_5"):
+        ''' Inception block 1 as figure 4 in the paper '''
+        d = lambda orig: int(orig * depth_multiplier)
+
+        # branch 0
+        b0 = self.conv2d_bn(x, d(64), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
+
+        # branch 1
+        if name == "Mixed_5c":
+            sublayer_names = ["Conv2d_0b", "Conv_1_0c"]
+        else:
+            sublayer_names = ["Conv2d_0a", "Conv2d_0b"]
+
+        b1 = self.conv2d_bn(x, d(48), (1, 1), name=f"Inception/{name}/Branch_1/{sublayer_names[0]}_1x1")
+        b1 = self.conv2d_bn(b1, d(64), (5, 5), name=f"Inception/{name}/Branch_1/{sublayer_names[1]}_5x5")
+
+        # branch 2
+        b2 = self.conv2d_bn(x, d(64), (1, 1), name=f"Inception/{name}/Branch_2/Conv2d_0a_1x1")
+        b2 = self.conv2d_bn(b2, d(96), (3, 3), name=f"Inception/{name}/Branch_2/Conv2d_0b_3x3")
+        b2 = self.conv2d_bn(b2, d(96), (3, 3), name=f"Inception/{name}/Branch_2/Conv2d_0c_3x3")
+
+        # branch 3
+        if name == "Mixed_5b":
+            layer_depth = d(32)
+        else:
+            layer_depth = d(64)
+
+        b3 = AveragePooling2D((3, 3), strides=(1, 1), padding='same', name=f"Inception/{name}/Branch_3/AvgPool_0a_3x3")(x)
+        b3 = self.conv2d_bn(b3, layer_depth, (1, 1), name=f"Inception/{name}/Branch_3/Conv2d_0b_1x1")
+
+        return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
 
         
     def conv2d_bn(self, x, filters, kernel_size, strides=1, padding='same', channel_first=False, name=None):
