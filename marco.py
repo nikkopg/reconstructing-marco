@@ -74,12 +74,35 @@ class Marco(tf.keras.Model):
         x = self.mixed_6d(x, self.max_depth["Mixed_6d"], name="Mixed_6d")
         x = self.mixed_6e(x, self.max_depth["Mixed_6e"], name="Mixed_6e")
 
+        '''
+        InceptionV3 has 2 classication heads: Logits and Auxiliary Logits. Read papers for the details.
+        The MARCO savedmodel weights also has these 2 classification heads.
+        AuxLogits head only used for training. We reconstruct this head just to store the weights.
+        '''
+        # Auxiliary Classification Head (not used in this model to inference) -- branched from Mixed_6e
+        if create_aux_logits:
+            aux_logits = AveragePooling2D(pool_size=(5, 5), strides=3, padding='valid', name='Inception/Logits/AuxLogits/AvgPool_1a_5x5')(x)
+            aux_logits = self.conv2d_bn(aux_logits, filters=128, kernel_size=(1, 1), name='Inception/AuxLogits/Conv2d_1b_1x1')
+            aux_logits = self.conv2d_bn(aux_logits, filters=768, kernel_size=(5, 5), padding='valid', name='Inception/AuxLogits/Conv2d_2a_5x5')
+            aux_logits = Conv2D(self.num_classes, (1, 1), name="Inception/AuxLogits/Conv2d_2b_1x1")(aux_logits)
+            aux_logits = Lambda(lambda t: tf.squeeze(t, [1, 2]), name="Inception/AuxLogits/SpatialSqueeze")(aux_logits)
+            aux_logits = Activation('softmax', name='Inception/AuxLogits/Predictions/Softmax')(aux_logits)
+
         # Mixed 7a, 7b, 7c blocks
         x = self.mixed_7a(x, self.max_depth["Mixed_7a"], name="Mixed_7a") 
         x = self.mixed_7b(x, self.max_depth["Mixed_7b"], name="Mixed_7b")
         x = self.mixed_7c(x, self.max_depth["Mixed_7c"], name="Mixed_7c")
 
-        return Model(self.input_layer, x, name='MARCO_InceptionV3')
+        # Main Classification Head
+        x = AveragePooling2D(pool_size=(8, 8), padding='valid', name="Inception/Logits/AvgPool_1a_8x8")(x)
+        x = Conv2D(self.num_classes, (1, 1), name="Inception/Logits/Conv2d_1c_1x1")(x)
+        x = Lambda(lambda t: tf.squeeze(t, [1, 2]), name="Inception/Logits/SpatialSqueeze")(x)
+        x = Activation('softmax', name="Inception/Logits/Predictions/Softmax")(x)
+
+        if create_aux_logits:
+            return Model(self.input_layer, [x, aux_logits], name="MARCO_InceptionV3")
+        else:
+            return Model(self.input_layer, x, name='MARCO_InceptionV3')
     
 
     def mixed_5_block(self, x, name="Mixed_5"):
