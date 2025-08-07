@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import Input, Model
+from tensorflow.keras.layers import Input, Model, Lambda
 from tensorflow.keras.layers import AveragePooling2D, MaxPooling2D, Concatenate
 
 
@@ -39,7 +39,7 @@ class Marco(tf.keras.Model):
         return self.model(inputs)
     
 
-    def build(self, depth_multiplier=1.0, create_aux_logits=True):
+    def build(self, create_aux_logits=True):
         
         '''
         Full network architecture is shown in model-arch.txt
@@ -73,6 +73,11 @@ class Marco(tf.keras.Model):
         x = self.mixed_6c(x, self.max_depth["Mixed_6c"], name="Mixed_6c")
         x = self.mixed_6d(x, self.max_depth["Mixed_6d"], name="Mixed_6d")
         x = self.mixed_6e(x, self.max_depth["Mixed_6e"], name="Mixed_6e")
+
+        # Mixed 7a, 7b, 7c blocks
+        x = self.mixed_7a(x, self.max_depth["Mixed_7a"], name="Mixed_7a") 
+        x = self.mixed_7b(x, self.max_depth["Mixed_7b"], name="Mixed_7b")
+        x = self.mixed_7c(x, self.max_depth["Mixed_7c"], name="Mixed_7c")
 
         return Model(self.input_layer, x, name='MARCO_InceptionV3')
     
@@ -218,6 +223,67 @@ class Marco(tf.keras.Model):
 
         # Concatenate all branches
         return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
+    
+
+    def mixed_7a(self, x, max_depth, name="Mixed_7a"):
+        ''' Inception block as figure 7 in the paper (https://arxiv.org/pdf/1512.00567) '''
+
+        d = lambda orig: min(int(orig * self.depth_multiplier), max_depth)
+
+        # branch 0
+        b0 = self.conv2d_bn(x, d(192), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
+        b0 = self.conv2d_bn(b0, d(320), (3, 3), strides=2, padding='valid', name=f"Inception/{name}/Branch_0/Conv2d_1a_3x3")
+
+        # branch 1
+        b1 = self.conv2d_bn(x, d(192), (1, 1), name=f"Inception/{name}/Branch_1/Conv2d_0a_1x1")
+        b1 = self.conv2d_bn(b1, d(192), (1, 7), name=f"Inception/{name}/Branch_1/Conv2d_0b_1x7")
+        b1 = self.conv2d_bn(b1, d(192), (7, 1), name=f"Inception/{name}/Branch_1/Conv2d_0c_7x1")
+        b1 = self.conv2d_bn(b1, d(192), (3, 3), strides=2, padding='valid', name=f"Inception/{name}/Branch_1/Conv2d_1a_3x3")
+
+        # branch 2 (MaxPool, no weights)
+        b2 = MaxPooling2D((3, 3), strides=2, padding='valid', name=f"Inception/{name}/Branch_2/MaxPool_1a_3x3")(x)
+
+        return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2])
+
+
+    def mixed_7b(self, x, max_depth, name="Mixed_7b"):
+        d = lambda orig: min(int(orig * self.depth_multiplier), max_depth)
+
+        # branch 0
+        b0 = self.conv2d_bn(x, d(320), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
+
+        # branch 1
+        '''
+        Mixed_7b and 7_b should've been exactly the same.
+        but the savedmodel weights name for layer Branch_1/Conv2d_0x_3x1 are different
+        Mixed_7b = 0b, while Mixed_7c = 0c. Typo?
+        '''
+        if name == "Mixed_7c":
+            branch_layer_name = '0c'
+        else:
+            branch_layer_name = '0b'
+
+        b1 = self.conv2d_bn(x, d(384), (1, 1), name=f"Inception/{name}/Branch_1/Conv2d_0a_1x1")
+        b1a = self.conv2d_bn(b1, d(384), (1, 3), name=f"Inception/{name}/Branch_1/Conv2d_0b_1x3")
+        b1b = self.conv2d_bn(b1, d(384), (3, 1), name=f"Inception/{name}/Branch_1/Conv2d_{branch_layer_name}_3x1")
+        b1 = Concatenate(name=f"Inception/{name}/Branch_1/concat")([b1a, b1b])
+
+        # branch 2
+        b2 = self.conv2d_bn(x, d(448), (1, 1), name=f"Inception/{name}/Branch_2/Conv2d_0a_1x1")
+        b2 = self.conv2d_bn(b2, d(384), (3, 3), name=f"Inception/{name}/Branch_2/Conv2d_0b_3x3")
+        b2a = self.conv2d_bn(b2, d(384), (1, 3), name=f"Inception/{name}/Branch_2/Conv2d_0c_1x3")
+        b2b = self.conv2d_bn(b2, d(384), (3, 1), name=f"Inception/{name}/Branch_2/Conv2d_0d_3x1")
+        b2 = Concatenate(name=f"Inception/{name}/Branch_2/concat")([b2a, b2b])
+        
+        # branch 3
+        b3 = AveragePooling2D((3, 3), strides=1, padding='same', name=f"Inception/{name}/Branch_3/AvgPool_0a_3x3")(x)
+        b3 = self.conv2d_bn(b3, d(96), (1, 1), name=f"Inception/{name}/Branch_3/Conv2d_0b_1x1") # -> this layer is hacked
+
+        return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
+
+
+    def mixed_7c(self, x, max_depth, name="Mixed_7c"):
+        return self.mixed_7b(x, max_depth, name="Mixed_7c")
 
         
     def conv2d_bn(self, x, filters, kernel_size, strides=1, padding='same', channel_first=False, name=None):
