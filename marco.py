@@ -63,23 +63,23 @@ class Marco(tf.keras.Model):
         x = MaxPooling2D((3, 3), strides=(2, 2), padding='valid', name="Inception/Inception/MaxPool_5a_3x3/MaxPool")(x)
 
         # Mixed 5b, 5c, 5d blocks
-        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5b")
-        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5c")
-        x = self.mixed_5_block(x, depth_multiplier, name="Mixed_5d")
+        x = self.mixed_5_block(x, name="Mixed_5b")
+        x = self.mixed_5_block(x, name="Mixed_5c")
+        x = self.mixed_5_block(x, name="Mixed_5d")
 
         # Mixed 6a, 6b, 6c, 6d, 6e blocks
-        x = self.mixed_6a(x, depth_multiplier, name="Mixed_6a")
-        x = self.mixed_6b(x, depth_multiplier, self.max_depth["Mixed_6b"], name="Mixed_6b")
-        x = self.mixed_6c(x, depth_multiplier, self.max_depth["Mixed_6c"], name="Mixed_6c")
-        x = self.mixed_6d(x, depth_multiplier, self.max_depth["Mixed_6d"], name="Mixed_6d")
-        x = self.mixed_6e(x, depth_multiplier, self.max_depth["Mixed_6e"], name="Mixed_6e")
+        x = self.mixed_6a(x, name="Mixed_6a")
+        x = self.mixed_6b(x, self.max_depth["Mixed_6b"], name="Mixed_6b")
+        x = self.mixed_6c(x, self.max_depth["Mixed_6c"], name="Mixed_6c")
+        x = self.mixed_6d(x, self.max_depth["Mixed_6d"], name="Mixed_6d")
+        x = self.mixed_6e(x, self.max_depth["Mixed_6e"], name="Mixed_6e")
 
         return Model(self.input_layer, x, name='MARCO_InceptionV3')
     
 
-    def mixed_5_block(self, x, depth_multiplier, name="Mixed_5"):
+    def mixed_5_block(self, x, name="Mixed_5"):
         ''' Inception block 1 as figure 4 in the paper '''
-        d = lambda orig: int(orig * depth_multiplier)
+        d = lambda orig: int(orig * self.depth_multiplier)
 
         # branch 0
         b0 = self.conv2d_bn(x, d(64), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
@@ -110,8 +110,8 @@ class Marco(tf.keras.Model):
         return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
     
 
-    def mixed_6a(self, x, depth_multiplier, name="Mixed_6a"):
-        d = lambda orig: int(orig * depth_multiplier)
+    def mixed_6a(self, x, name="Mixed_6a"):
+        d = lambda orig: int(orig * self.depth_multiplier)
 
         # branch 0
         b0 = self.conv2d_bn(x, d(256), (3, 3), strides=2, padding='valid', name=f"Inception/{name}/Branch_0/Conv2d_1a_1x1")   # this layer is hacked
@@ -128,10 +128,10 @@ class Marco(tf.keras.Model):
         return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2])
 
 
-    def mixed_6b(self, x, depth_multiplier, max_depth, name="Mixed_6b"):
+    def mixed_6b(self, x, max_depth, name="Mixed_6b"):
         ''' Inception block as figure 6 in the paper '''
 
-        d = lambda orig: min(int(orig * depth_multiplier), max_depth)
+        d = lambda orig: min(int(orig * self.depth_multiplier), max_depth)
 
         # branch 0
         b0 = self.conv2d_bn(x, d(192), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
@@ -156,10 +156,9 @@ class Marco(tf.keras.Model):
         return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
 
 
-    def mixed_6c(self, x, depth_multiplier, max_depth, name="Mixed_6c"):
+    def mixed_6c(self, x, max_depth, name="Mixed_6c"):
         ''' Inception block as figure 6 in the paper '''
-
-        d = lambda orig: min(int(orig * depth_multiplier), max_depth)
+        d = lambda orig: min(int(orig * self.depth_multiplier), max_depth)
 
         # branch 0
         b0 = self.conv2d_bn(x, d(192), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
@@ -189,15 +188,14 @@ class Marco(tf.keras.Model):
         return Concatenate(axis=3, name=f"Inception/{name}/concat")([b0, b1, b2, b3])
 
 
-    def mixed_6d(self, x, depth_multiplier, max_depth, name="Mixed_6d"):
+    def mixed_6d(self, x, max_depth, name="Mixed_6d"):
         ''' Inception block as figure 6 in the paper. Similar to 6c'''
-        return self.inception_6c(x, depth_multiplier, max_depth, name=name)
+        return self.inception_6c(x, max_depth, name=name)
 
 
-    def mixed_6e(self, x, depth_multiplier, max_depth, name="Mixed_6e"):
+    def mixed_6e(self, x, max_depth, name="Mixed_6e"):
         ''' Inception block as figure 6 in the paper '''
-
-        d = lambda orig: min(int(orig * depth_multiplier), max_depth)
+        d = lambda orig: min(int(orig * self.depth_multiplier), max_depth)
 
         # branch 0
         b0 = self.conv2d_bn(x, d(192), (1, 1), name=f"Inception/{name}/Branch_0/Conv2d_0a_1x1")
