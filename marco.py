@@ -5,7 +5,7 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, Activation, Lamb
 from tensorflow.keras.layers import AveragePooling2D, MaxPooling2D, Concatenate
 
 
-class Marco(tf.keras.Model):
+class MarcoWrapper():
 
     def __init__(self, depth_multiplier=1.0, **kwargs):
         super().__init__(**kwargs)
@@ -35,11 +35,6 @@ class Marco(tf.keras.Model):
         self.input_layer = None
         # self.output_layer = None
         self.model = self.reconstruct(depth_multiplier)
-
-    
-    def call(self, inputs):
-        '''  '''
-        return self.model(inputs)
     
 
     def reconstruct(self, create_aux_logits=True):

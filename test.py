@@ -6,7 +6,7 @@ from utils import map_ckpt_to_keras
 def count_matched_weights(ckpt_vars, model):
     matched = 0
     for ckpt_name in ckpt_vars:    
-        for var in model.variables:
+        for var in model.model.variables:
             keras_name = map_ckpt_to_keras(ckpt_name)
             if keras_name == var.name and ckpt_vars[ckpt_name].shape == var.shape:
                 # check if the weights value are the same
