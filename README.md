@@ -1,7 +1,7 @@
 # Reconstructing MARCO Model
 This repository contains a simple reconstruction of Marco Model from "[Automating the Evaluation of Crystallization Experiments](https://arxiv.org/pdf/1803.10342)" paper conducted in 2018. The former model was trained and saved in old Tensorflow format that only contains the weights with no information of its architecture graph--the frozen graph. This form of model could not be saved into a newer Tensorflow format like `.h5` or `.keras`, which also limiting the possibility to convert it to another framework like `onnx`. The end goal for the project is to enable Marco model deployment in local platforms.
 
-This repository simply reconstruct the Marco model from scratch--layer by layer--referring to its paper and standard [InceptionV3 implementation in Keras API](https://github.com/keras-team/keras/blob/v3.3.3/keras/src/applications/inception_v3.py) and [Tensorflow Slim](https://github.com/tensorflow/models/blob/master/research/slim/nets/inception_v3.py).
+This repository simply reconstruct the Marco model from scratch--layer by layer--referring to its paper and standard [InceptionV3 implementation in Keras API](https://github.com/keras-team/keras/blob/v3.3.3/keras/src/applications/inception_v3.py) and [Tensorflow Slim](https://github.com/tensorflow/models/blob/master/research/slim/nets/inception_v3.py). The original documentation of Marco model can be found here: https://github.com/tensorflow/models/tree/master/research/marco.
 
 ## Environment Installation
 ### Python Virtual Environment
