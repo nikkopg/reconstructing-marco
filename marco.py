@@ -1,12 +1,13 @@
+from test import map_ckpt_to_keras
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import Input, Model, Lambda
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Conv2D, BatchNormalization, Activation, Lambda, Input
 from tensorflow.keras.layers import AveragePooling2D, MaxPooling2D, Concatenate
 
 
 class Marco(tf.keras.Model):
 
-    def __init__(self, depth_multiplier, **kwargs):
+    def __init__(self, depth_multiplier=1.0, **kwargs):
         super().__init__(**kwargs)
 
         ''' 
@@ -15,6 +16,9 @@ class Marco(tf.keras.Model):
         one of the modification was the maximum conv layer depths to reduce model complexity.
         '''
         self.num_classes = 4
+        self.batch_size = 64
+        self.num_training_samples = 442930  # total of training image mentioned in the paper, adjust as needed
+
         self.max_depth = {
             "Conv2d_4a_3x3": 144,
             "Mixed_6b": 128,
@@ -25,13 +29,12 @@ class Marco(tf.keras.Model):
             "Mixed_7b": 192,
             "Mixed_7c": 192,
         }
-        
 
         # build model
         self.depth_multiplier = depth_multiplier
         self.input_layer = None
-        self.output_layer = None
-        self.model = self.build(depth_multiplier)
+        # self.output_layer = None
+        self.model = self.reconstruct(depth_multiplier)
 
     
     def call(self, inputs):
@@ -39,17 +42,17 @@ class Marco(tf.keras.Model):
         return self.model(inputs)
     
 
-    def build(self, create_aux_logits=True):
+    def reconstruct(self, create_aux_logits=True):
         
         '''
         Full network architecture is shown in model-arch.txt
         '''
 
         # Bigger input layer (599, 599, 3)
-        self.input_layer = Input(shape=(599, 599, 3), name="input")
+        inputs = Input(shape=(599, 599, 3), name="input")
 
         # Additional layer to compress larger input image, naming it as Conv2d_0a_3x3
-        x = self.conv2d_bn(self.input_layer, filters=16, kernel_size=(3, 3), strides=2, name="Inception/Conv2d_0a_3x3")
+        x = self.conv2d_bn(inputs, filters=16, kernel_size=(3, 3), strides=2, name="Inception/Conv2d_0a_3x3")
 
         # First convolutional layer block
         x = self.conv2d_bn(x, filters=32, kernel_size=(3, 3), strides=(2, 2), padding='valid', name="Inception/Conv2d_1a_3x3")
@@ -100,9 +103,36 @@ class Marco(tf.keras.Model):
         x = Activation('softmax', name="Inception/Logits/Predictions/Softmax")(x)
 
         if create_aux_logits:
-            return Model(self.input_layer, [x, aux_logits], name="MARCO_InceptionV3")
+            model = Model(inputs, [x, aux_logits], name="MARCO_InceptionV3")
         else:
-            return Model(self.input_layer, x, name='MARCO_InceptionV3')
+            model = Model(inputs, x, name='MARCO_InceptionV3')
+        
+        steps_per_epoch = self.num_training_samples // self.batch_size
+        decay_epochs = 2
+        decay_steps = steps_per_epoch * decay_epochs
+
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=0.045,
+            decay_steps=decay_steps,
+            decay_rate=0.94,
+            staircase=True
+        )
+
+        optimizer = tf.keras.optimizers.RMSprop(
+            learning_rate=lr_schedule,
+            rho=0.9,
+            momentum=0.9,
+            epsilon=0.1,
+            centered=False  # default
+        )
+
+        model.compile(
+            optimizer=optimizer,
+            loss='categorical_crossentropy',  # adjust to your task, might need to recompile
+            metrics=['accuracy']
+        )
+
+        return model
     
 
     def mixed_5_block(self, x, name="Mixed_5"):
@@ -218,7 +248,7 @@ class Marco(tf.keras.Model):
 
     def mixed_6d(self, x, max_depth, name="Mixed_6d"):
         ''' Inception block as figure 6 in the paper. Similar to 6c'''
-        return self.inception_6c(x, max_depth, name=name)
+        return self.mixed_6c(x, max_depth, name=name)
 
 
     def mixed_6e(self, x, max_depth, name="Mixed_6e"):
@@ -306,7 +336,7 @@ class Marco(tf.keras.Model):
 
 
     def mixed_7c(self, x, max_depth, name="Mixed_7c"):
-        return self.mixed_7b(x, max_depth, name="Mixed_7c")
+        return self.mixed_7b(x, max_depth, name=name)
 
         
     def conv2d_bn(self, x, filters, kernel_size, strides=1, padding='same', channel_first=False, name=None):
@@ -328,7 +358,7 @@ class Marco(tf.keras.Model):
             x           : output tensor after conv2d, batch norm and relu activation
         '''
 
-        conv_name = f"{name}/Conv2d" if name else None
+        conv_name = f"{name}" if name else None
         bn_name = f"{name}/BatchNorm" if name else None
         relu_name = f"{name}/Relu" if name else None
 
@@ -337,10 +367,24 @@ class Marco(tf.keras.Model):
         else:
             bn_axis = 3
 
-        x = Conv2D(filters, kernel_size, strides=strides, padding=padding, use_bias=False, name=conv_name)
+        x = Conv2D(filters, kernel_size, strides=strides, padding=padding, use_bias=False, name=conv_name)(x)
         x = BatchNormalization(axis=bn_axis, scale=False, name=bn_name)(x)
         x = Activation("relu", name=relu_name)(x)
 
         return x
+    
 
+    def load_weights(self, checkpoint_variables):
+        assigned = 0
+        for ckpt_name in checkpoint_variables:    
+            for var in self.model.variables:
+                keras_name = map_ckpt_to_keras(ckpt_name)
+                if keras_name == var.name and checkpoint_variables[ckpt_name].shape == var.shape:
+                    var.assign(checkpoint_variables[ckpt_name])
+                    print(f"Assigned {ckpt_name} ({checkpoint_variables[ckpt_name].shape}) -> {var.name} ({var.shape})")
+                    assigned += 1
+                    break
+            else:
+                print(f"Skipped {ckpt_name} ({checkpoint_variables[ckpt_name].shape}) (no matching checkpoint variable found)")
 
+        print(f"Total assigned: {assigned}/{len(checkpoint_variables)}")
