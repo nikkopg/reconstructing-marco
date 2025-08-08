@@ -40,7 +40,7 @@ class MarcoWrapper():
     def reconstruct(self, create_aux_logits=True):
         
         '''
-        Full network architecture is shown in model-arch.txt
+        Full network architecture is shown in marco-arch.txt
         '''
 
         # Bigger input layer (599, 599, 3)
